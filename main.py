@@ -1,4 +1,5 @@
-from fastapi import FastAPI, Request, Header, HTTPException, BackgroundTasksimport httpx
+from fastapi import FastAPI, Request, Header, HTTPException, BackgroundTasks
+import httpx
 import os
 import io
 import re
@@ -15,7 +16,6 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("bot")
 
 app = FastAPI()
-
 ai_client = OpenAI(api_key=PERPLEXITY_API_KEY, base_url="https://api.perplexity.ai/v1")
 
 
