@@ -18,3 +18,4 @@ if not BOT_TOKEN:
 
 if not WEBHOOK_SECRET:
     raise ValueError("WEBHOOK_SECRET is missing in .env")
+PERPLEXITY_API_KEY = os.environ.get("PERPLEXITY_API_KEY")
