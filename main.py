@@ -19,6 +19,7 @@ app = FastAPI()
 
 ai_client = OpenAI(api_key=PERPLEXITY_API_KEY, base_url="https://api.perplexity.ai/v1")
 
+
 @app.on_event("startup")
 async def startup_event():
     init_db()
@@ -57,6 +58,17 @@ async def send_telegram_message(chat_id, text, reply_markup=None, parse_mode=Non
                 logger.warning(f"sendMessage failed: {response.status_code} {response.text}")
     except httpx.RequestError:
         logger.exception("Network error in send_telegram_message")
+
+
+async def send_long_message(chat_id, text, reply_markup=None, parse_mode=None):
+    max_len = 4000
+    if len(text) <= max_len:
+        await send_telegram_message(chat_id, text, reply_markup, parse_mode)
+        return
+    parts = [text[i:i+max_len] for i in range(0, len(text), max_len)]
+    for i, part in enumerate(parts):
+        is_last = (i == len(parts) - 1)
+        await send_telegram_message(chat_id, part, reply_markup if is_last else None, parse_mode if is_last else None)
 
 
 async def answer_callback_query(callback_query_id, text=""):
@@ -330,7 +342,7 @@ async def handle_message(message):
         update_user(chat_id, cv_file_id=file_id, cv_file_name=file_name, cv_text=cv_text)
 
         analysis = await analyze_cv(cv_text)
-        await send_telegram_message(chat_id, f"📊 نتيجة التحليل:\n\n{analysis}")
+        await send_long_message(chat_id, f"📊 نتيجة التحليل:\n\n{analysis}")
 
         improved_text = await rewrite_cv_ats(cv_text)
         if improved_text:
@@ -371,9 +383,8 @@ async def handle_message(message):
         await send_telegram_message(chat_id, "⏳ جاري توليد خطاب التقديم...")
         cover_letter = await generate_cover_letter(cv_text, text)
         set_user_state(chat_id, "")
-        await send_telegram_message(chat_id, f"✉️ خطاب التقديم المخصص:\n\n{cover_letter}", main_menu())
+        await send_long_message(chat_id, f"✉️ خطاب التقديم المخصص:\n\n{cover_letter}", main_menu())
         return {"ok": True}
 
     await send_telegram_message(chat_id, "لم أفهم طلبك، استخدم الأزرار أدناه:", main_menu())
     return {"ok": True}
-    
