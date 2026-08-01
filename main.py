@@ -16,6 +16,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("bot")
 
 app = FastAPI()
+
 ai_client = OpenAI(api_key=PERPLEXITY_API_KEY, base_url="https://api.perplexity.ai/v1")
 
 
@@ -239,19 +240,19 @@ async def handle_callback_query(callback_query):
     data = callback_query.get("data", "")
     chat_id = callback_query.get("message", {}).get("chat", {}).get("id")
     if not chat_id:
-        return {"ok": True}
+        return
 
     if data == "setup_profile":
         set_user_state(chat_id, "waiting_full_name")
         await answer_callback_query(callback_id, "إعداد الملف")
         await send_telegram_message(chat_id, "👋 لنبدأ إعداد ملفك الوظيفي.\n\nأرسل اسمك الكامل:")
-        return {"ok": True}
+        return
 
     if data == "upload_cv":
         set_user_state(chat_id, "waiting_language")
         await answer_callback_query(callback_id, "اختر اللغة")
         await send_telegram_message(chat_id, "🌐 بأي لغة تريد سيرتك الذاتية المحسّنة وخطاب التقديم؟", language_menu())
-        return {"ok": True}
+        return
 
     if data in ("lang_ar", "lang_en"):
         chosen_lang = "العربية" if data == "lang_ar" else "English"
@@ -259,18 +260,18 @@ async def handle_callback_query(callback_query):
         set_user_state(chat_id, "waiting_cv")
         await answer_callback_query(callback_id, chosen_lang)
         await send_telegram_message(chat_id, "📄 أرسل سيرتك الذاتية الآن كملف PDF أو DOCX:")
-        return {"ok": True}
+        return
 
     if data == "gen_cover_letter":
         user = get_or_create_user(chat_id)
         if not user.get("cv_file_id"):
             await answer_callback_query(callback_id, "لا توجد سيرة ذاتية")
             await send_telegram_message(chat_id, "⚠️ يجب رفع سيرتك الذاتية أولًا قبل توليد خطاب التقديم.", main_menu())
-            return {"ok": True}
+            return
         set_user_state(chat_id, "waiting_job_description")
         await answer_callback_query(callback_id, "خطاب التقديم")
         await send_telegram_message(chat_id, "✉️ أرسل الآن الوصف الوظيفي (Job Description) للوظيفة المطلوبة:")
-        return {"ok": True}
+        return
 
     if data == "help":
         await answer_callback_query(callback_id, "مساعدة")
@@ -284,16 +285,14 @@ async def handle_callback_query(callback_query):
             "5️⃣ أرسل الوصف الوظيفي المطلوب لتوليد خطاب تقديم مخصص تلقائيًا",
             main_menu()
         )
-        return {"ok": True}
-
-    return {"ok": True}
+        return
 
 
 async def handle_message(message):
     chat = message.get("chat", {})
     chat_id = chat.get("id")
     if not chat_id:
-        return {"ok": True}
+        return
 
     text = (message.get("text") or "").strip()
     user = get_or_create_user(chat_id)
@@ -305,46 +304,46 @@ async def handle_message(message):
             "أهلًا بك 👋\n\nأنا بوت تحليل وتحسين السيرة الذاتية بنظام ATS.\n\nابدأ الآن:",
             main_menu()
         )
-        return {"ok": True}
+        return
 
     if text == "/cancel":
         set_user_state(chat_id, "")
         await send_telegram_message(chat_id, "❌ تم إلغاء العملية الحالية.", main_menu())
-        return {"ok": True}
+        return
 
     current_state, _ = get_user_state_full(chat_id)
 
     if current_state == "waiting_full_name":
         if len(text) < 3:
             await send_telegram_message(chat_id, "⚠️ أرسل اسمًا صحيحًا (3 أحرف على الأقل).")
-            return {"ok": True}
+            return
         update_user(chat_id, full_name=text)
         set_user_state(chat_id, "waiting_phone")
         await send_telegram_message(chat_id, "📱 أرسل رقم جوالك:")
-        return {"ok": True}
+        return
 
     if current_state == "waiting_phone":
         digits_only = text.replace(" ", "").replace("-", "")
         if not digits_only.isdigit() or len(digits_only) < 9:
             await send_telegram_message(chat_id, "⚠️ أرسل رقم جوال صحيح (أرقام فقط).")
-            return {"ok": True}
+            return
         update_user(chat_id, phone=text)
         set_user_state(chat_id, "waiting_specialization")
         await send_telegram_message(chat_id, "🎯 أرسل تخصصك أو مجالك المستهدف:")
-        return {"ok": True}
+        return
 
     if current_state == "waiting_specialization":
         if len(text) < 2:
             await send_telegram_message(chat_id, "⚠️ أرسل تخصصًا صحيحًا.")
-            return {"ok": True}
+            return
         update_user(chat_id, specialization=text)
         set_user_state(chat_id, "waiting_language")
         await send_telegram_message(chat_id, "✅ تم حفظ بياناتك.\n\n🌐 بأي لغة تريد سيرتك الذاتية المحسّنة وخطاب التقديم؟", language_menu())
-        return {"ok": True}
+        return
 
     if current_state == "waiting_language":
         await send_telegram_message(chat_id, "⚠️ الرجاء استخدام الأزرار لاختيار اللغة.", language_menu())
-        return {"ok": True}
+        return
 
     if "document" in message:
         document = message["document"]
@@ -353,11 +352,11 @@ async def handle_message(message):
 
         if not file_name.lower().endswith((".pdf", ".docx", ".doc")):
             await send_telegram_message(chat_id, "⚠️ الرجاء رفع ملف بصيغة PDF أو DOCX فقط.")
-            return {"ok": True}
+            return
 
         if current_state != "waiting_cv":
             await send_telegram_message(chat_id, "⚠️ اضغط '📄 رفع سيرتي الذاتية' أولًا من القائمة.", main_menu())
-            return {"ok": True}
+            return
 
         await send_telegram_message(chat_id, "⏳ جاري تحليل سيرتك الذاتية، الرجاء الانتظار...")
 
@@ -367,7 +366,7 @@ async def handle_message(message):
         if len(cv_text.strip()) < 30:
             await send_telegram_message(chat_id, "⚠️ تعذر استخراج نص كافٍ من الملف. تأكد أن الملف يحتوي نصًا قابلًا للقراءة.")
             set_user_state(chat_id, "")
-            return {"ok": True}
+            return
 
         update_user(chat_id, cv_file_id=file_id, cv_file_name=file_name, cv_text=cv_text)
 
@@ -376,7 +375,7 @@ async def handle_message(message):
         analysis = await analyze_cv(cv_text, cv_language)
         await send_long_message(chat_id, f"📊 نتيجة التحليل الأولي:\n\n{analysis}")
 
-                improved_text = await rewrite_cv_ats(cv_text, cv_language)
+        improved_text = await rewrite_cv_ats(cv_text, cv_language)
 
         if improved_text:
             update_user(chat_id, cv_text=improved_text)
@@ -401,19 +400,19 @@ async def handle_message(message):
                 f"📥 عميل جديد حلل سيرته:\n👤 {user.get('full_name', 'غير محدد')}\n📱 {user.get('phone', 'غير محدد')}\n🆔 {chat_id}"
             )
 
-        return {"ok": True}
+        return
 
     if current_state == "waiting_job_description":
         if len(text) < 10:
             await send_telegram_message(chat_id, "⚠️ أرسل وصفًا وظيفيًا أكثر تفصيلًا.")
-            return {"ok": True}
+            return
 
         user = get_or_create_user(chat_id)
         cv_text = user.get("cv_text", "")
         if not cv_text:
             await send_telegram_message(chat_id, "⚠️ لم يتم العثور على سيرتك الذاتية. ارفعها من جديد.", main_menu())
             set_user_state(chat_id, "")
-            return {"ok": True}
+            return
 
         cv_language = user.get("cv_language", "العربية")
 
@@ -421,7 +420,7 @@ async def handle_message(message):
         cover_letter = await generate_cover_letter(cv_text, text, cv_language)
         set_user_state(chat_id, "")
         await send_long_message(chat_id, f"✉️ خطاب التقديم المخصص:\n\n{cover_letter}", main_menu())
-        return {"ok": True}
+        return
 
     await send_telegram_message(chat_id, "لم أفهم طلبك، استخدم الأزرار أدناه:", main_menu())
-    return {"ok": True}
+    return
