@@ -827,8 +827,7 @@ async def handle_message(message):
     if not chat_id:
         return {"ok": True}
 
-    text = message.get("text", "").strip()
-    user = get_or_create_user(chat_id)
+    text = message.get("text", "").strip() or message.get("caption", "").strip()    user = get_or_create_user(chat_id)
 
     if text == "/start":
         set_user_state(chat_id, "")
