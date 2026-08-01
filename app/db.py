@@ -26,6 +26,7 @@ def init_db():
             cv_file_id TEXT DEFAULT '',
             cv_file_name TEXT DEFAULT '',
             cv_text TEXT DEFAULT '',
+            cv_language TEXT DEFAULT 'العربية',
             service_type TEXT DEFAULT '',
             email_subject TEXT DEFAULT '',
             email_body TEXT DEFAULT '',
@@ -64,6 +65,9 @@ def init_db():
         conn.commit()
     if "cv_text" not in cols:
         c.execute("ALTER TABLE users ADD COLUMN cv_text TEXT DEFAULT ''")
+        conn.commit()
+    if "cv_language" not in cols:
+        c.execute("ALTER TABLE users ADD COLUMN cv_language TEXT DEFAULT 'العربية'")
         conn.commit()
 
     conn.close()
