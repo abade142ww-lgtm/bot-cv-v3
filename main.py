@@ -319,9 +319,9 @@ async def handle_message(message):
         if len(text) < 2:
             await send_telegram_message(chat_id, "⚠️ أرسل تخصصًا صحيحًا.")
             return {"ok": True}
-        update_user(chat_id, specialization=text)
-        set_user_state(chat_id, "waiting_cv")
-        await send_telegram_message(chat_id, "✅ تم حفظ بياناتك.\n\n📄 الآن أرسل سيرتك الذاتية كملف PDF أو DOCX:")
+                update_user(chat_id, specialization=text)
+        set_user_state(chat_id, "waiting_language")
+        await send_telegram_message(chat_id, "✅ تم حفظ بياناتك.\n\n🌐 بأي لغة تريد سيرتك الذاتية المحسّنة وخطاب التقديم؟", language_menu())
         return {"ok": True}
 
     if "document" in message:
