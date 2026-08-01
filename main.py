@@ -376,29 +376,14 @@ async def handle_message(message):
         analysis = await analyze_cv(cv_text, cv_language)
         await send_long_message(chat_id, f"📊 نتيجة التحليل الأولي:\n\n{analysis}")
 
-        current_text = cv_text
-        final_score = extract_score(analysis)
-        max_attempts = 5
-        attempt = 0
+                improved_text = await rewrite_cv_ats(cv_text, cv_language)
 
-        improved_text = await rewrite_cv_ats(current_text, cv_language)
-        while improved_text and attempt < max_attempts:
-            re_analysis = await analyze_cv(improved_text, cv_language)
-            new_score = extract_score(re_analysis)
-            if new_score >= final_score:
-                current_text = improved_text
-                final_score = new_score
-            attempt += 1
-            if final_score >= 95:
-                break
-            improved_text = await rewrite_cv_ats(current_text, cv_language)
-
-        if current_text != cv_text:
-            update_user(chat_id, cv_text=current_text)
-            docx_bytes = build_docx_from_text(current_text)
+        if improved_text:
+            update_user(chat_id, cv_text=improved_text)
+            docx_bytes = build_docx_from_text(improved_text)
             await send_document_bytes(
                 chat_id, docx_bytes, "CV_Improved_ATS.docx",
-                caption=f"✅ نسخة محسّنة نهائية (تقييم ATS التقديري: {final_score}/100)"
+                caption="✅ هذه نسخة محسّنة من سيرتك الذاتية متوافقة مع أنظمة ATS."
             )
         else:
             await send_telegram_message(chat_id, "⚠️ تعذر تحسين السيرة الذاتية تلقائيًا، حاول مرة أخرى.")
