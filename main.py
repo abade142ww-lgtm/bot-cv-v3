@@ -5,6 +5,10 @@ import os
 import html
 import logging
 from datetime import datetime
+import re
+import pdfplumber
+import docx
+import io
 
 from app.config import BOT_TOKEN, ADMIN_CHAT_ID, WEBHOOK_SECRET, BASE_URL
 from app.db import (
