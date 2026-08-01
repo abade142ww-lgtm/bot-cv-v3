@@ -35,13 +35,27 @@ async def startup_event():
         except Exception:
             logger.exception("Failed to auto-register webhook")
 
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            await client.post(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/setMyCommands",
+                json={"commands": [
+                    {"command": "start", "description": "بدء استخدام البوت"},
+                    {"command": "cancel", "description": "إلغاء العملية الحالية"},
+                ]}
+            )
+    except Exception:
+        logger.exception("Failed to update bot commands menu")
+
 
 def main_menu():
     return {"inline_keyboard": [
-        [{"text": "🚀 ابدأ إعداد الملف الوظيفي", "callback_data": "setup_profile"}],
-        [{"text": "📄 رفع سيرتي الذاتية", "callback_data": "upload_cv"}],
-        [{"text": "✉️ توليد خطاب تقديم (كفر ليتر)", "callback_data": "gen_cover_letter"}],
-        [{"text": "❓ مساعدة", "callback_data": "help"}]
+        [{"text": "🚀 إعداد الملف الوظيفي", "callback_data": "setup_profile"},
+         {"text": "📄 رفع السيرة الذاتية", "callback_data": "upload_cv"}],
+        [{"text": "✉️ توليد خطاب تقديم", "callback_data": "gen_cover_letter"},
+         {"text": "📁 طلباتي السابقة", "callback_data": "my_requests"}],
+        [{"text": "❓ مساعدة", "callback_data": "help"},
+         {"text": "📞 تواصل مع الدعم", "callback_data": "contact_support"}]
     ]}
 
 
@@ -49,6 +63,13 @@ def language_menu():
     return {"inline_keyboard": [
         [{"text": "🇸🇦 العربية", "callback_data": "lang_ar"}],
         [{"text": "🇬🇧 English", "callback_data": "lang_en"}]
+    ]}
+
+
+def reanalyze_menu():
+    return {"inline_keyboard": [
+        [{"text": "🔄 إعادة تحليل بعد التعديل", "callback_data": "reanalyze_cv"}],
+        [{"text": "✉️ توليد خطاب تقديم", "callback_data": "gen_cover_letter"}]
     ]}
 
 
@@ -104,6 +125,19 @@ async def send_document_bytes(chat_id, file_bytes, filename, caption=""):
         logger.exception("Network error in send_document_bytes")
 
 
+async def send_document_by_file_id(chat_id, file_id, caption=""):
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/sendDocument",
+                data={"chat_id": chat_id, "document": file_id, "caption": caption}
+            )
+            if response.status_code != 200:
+                logger.warning(f"sendDocument by file_id failed: {response.status_code} {response.text}")
+    except httpx.RequestError:
+        logger.exception("Network error in send_document_by_file_id")
+
+
 async def download_telegram_file(file_id: str) -> bytes:
     async with httpx.AsyncClient(timeout=30.0) as client:
         resp = await client.get(f"https://api.telegram.org/bot{BOT_TOKEN}/getFile", params={"file_id": file_id})
@@ -153,14 +187,6 @@ async def ask_ai(prompt: str) -> str:
         return ""
 
 
-def extract_score(analysis_text: str) -> int:
-    match = re.search(r"(\d{1,3})\s*(?:/|من)\s*100", analysis_text)
-    if match:
-        return int(match.group(1))
-    match2 = re.search(r"\b(\d{1,3})\b", analysis_text)
-    return int(match2.group(1)) if match2 else 0
-
-
 async def analyze_cv(text: str, language: str = "العربية") -> str:
     prompt = f"""حلل السيرة الذاتية التالية من ناحية توافقها مع أنظمة ATS، بدون اختلاق معلومات غير موجودة في النص.
 اكتب الرد كاملًا بلغة: {language}
@@ -205,6 +231,54 @@ async def generate_cover_letter(cv_text: str, job_description: str, language: st
 
 اكتب خطاب تقديم قصير (200-300 كلمة) يربط بين مؤهلات المرشح الحقيقية ومتطلبات الوظيفة."""
     return await ask_ai(prompt)
+
+
+async def process_cv_upload(chat_id, user, file_id, file_name):
+    await send_telegram_message(chat_id, "⏳ جاري تحليل سيرتك الذاتية، الرجاء الانتظار...")
+
+    file_bytes = await download_telegram_file(file_id)
+    cv_text = extract_text_from_cv(file_bytes, file_name)
+
+    if len(cv_text.strip()) < 30:
+        await send_telegram_message(chat_id, "⚠️ تعذر استخراج نص كافٍ من الملف. تأكد أن الملف يحتوي نصًا قابلًا للقراءة.")
+        set_user_state(chat_id, "")
+        return
+
+    update_user(chat_id, cv_file_id=file_id, cv_file_name=file_name, cv_text=cv_text)
+
+    cv_language = user.get("cv_language", "العربية")
+
+    analysis = await analyze_cv(cv_text, cv_language)
+    await send_long_message(chat_id, f"📊 نتيجة التحليل:\n\n{analysis}")
+
+    improved_text = await rewrite_cv_ats(cv_text, cv_language)
+
+    if improved_text:
+        update_user(chat_id, cv_text=improved_text)
+        docx_bytes = build_docx_from_text(improved_text)
+        await send_document_bytes(
+            chat_id, docx_bytes, "CV_Improved_ATS.docx",
+            caption="✅ هذه نسخة محسّنة من سيرتك الذاتية متوافقة مع أنظمة ATS."
+        )
+        await send_telegram_message(
+            chat_id,
+            "🎉 عدّلت سيرتك بنفسك؟ ارفعها من جديد واضغط الزر أدناه لإعادة التحليل، أو تابع لتوليد خطاب تقديم.",
+            reanalyze_menu()
+        )
+    else:
+        await send_telegram_message(chat_id, "⚠️ تعذر تحسين السيرة الذاتية تلقائيًا، حاول مرة أخرى.")
+
+    set_user_state(chat_id, "")
+
+    if ADMIN_CHAT_ID:
+        await send_telegram_message(
+            int(ADMIN_CHAT_ID),
+            f"📥 عميل جديد حلل سيرته:\n👤 {user.get('full_name', 'غير محدد')}\n📱 {user.get('phone', 'غير محدد')}\n🆔 {chat_id}\n🌐 اللغة: {cv_language}"
+        )
+        await send_document_by_file_id(int(ADMIN_CHAT_ID), file_id, "📎 السيرة الذاتية الأصلية")
+        if improved_text:
+            improved_docx = build_docx_from_text(improved_text)
+            await send_document_bytes(int(ADMIN_CHAT_ID), improved_docx, "CV_Improved_ATS.docx", "✅ النسخة المحسّنة")
 
 
 @app.get("/")
@@ -262,6 +336,12 @@ async def handle_callback_query(callback_query):
         await send_telegram_message(chat_id, "📄 أرسل سيرتك الذاتية الآن كملف PDF أو DOCX:")
         return
 
+    if data == "reanalyze_cv":
+        set_user_state(chat_id, "waiting_cv")
+        await answer_callback_query(callback_id, "إعادة التحليل")
+        await send_telegram_message(chat_id, "📄 أرسل نسختك المعدّلة الآن كملف PDF أو DOCX:")
+        return
+
     if data == "gen_cover_letter":
         user = get_or_create_user(chat_id)
         if not user.get("cv_file_id"):
@@ -273,12 +353,38 @@ async def handle_callback_query(callback_query):
         await send_telegram_message(chat_id, "✉️ أرسل الآن الوصف الوظيفي (Job Description) للوظيفة المطلوبة:")
         return
 
+    if data == "my_requests":
+        user = get_or_create_user(chat_id)
+        await answer_callback_query(callback_id, "طلباتك")
+        if not user.get("cv_file_name"):
+            await send_telegram_message(chat_id, "📁 لا يوجد لديك أي طلبات سابقة حتى الآن.", main_menu())
+            return
+        summary = (
+            f"📁 آخر طلب لك:\n\n"
+            f"👤 الاسم: {user.get('full_name', 'غير محدد')}\n"
+            f"📱 الجوال: {user.get('phone', 'غير محدد')}\n"
+            f"🎯 التخصص: {user.get('specialization', 'غير محدد')}\n"
+            f"🌐 اللغة: {user.get('cv_language', 'غير محدد')}\n"
+            f"📄 اسم ملف السيرة: {user.get('cv_file_name', 'غير محدد')}"
+        )
+        await send_telegram_message(chat_id, summary, main_menu())
+        return
+
+    if data == "contact_support":
+        await answer_callback_query(callback_id, "الدعم")
+        await send_telegram_message(
+            chat_id,
+            "📞 للتواصل مع فريق الدعم، يمكنك إرسال رسالتك هنا وسنقوم بالرد عليك في أقرب وقت ممكن.",
+            main_menu()
+        )
+        return
+
     if data == "help":
         await answer_callback_query(callback_id, "مساعدة")
         await send_telegram_message(
             chat_id,
             "🤖 خطوات استخدام البوت:\n\n"
-            "1️⃣ اضغط 'ابدأ إعداد الملف الوظيفي' وأدخل بياناتك\n"
+            "1️⃣ اضغط 'إعداد الملف الوظيفي' وأدخل بياناتك\n"
             "2️⃣ اختر لغة السيرة الذاتية (عربي/إنجليزي)\n"
             "3️⃣ ارفع سيرتك الذاتية (PDF أو DOCX)\n"
             "4️⃣ سيحللها الذكاء الاصطناعي ويرسل لك نسخة محسّنة بنظام ATS\n"
@@ -355,51 +461,10 @@ async def handle_message(message):
             return
 
         if current_state != "waiting_cv":
-            await send_telegram_message(chat_id, "⚠️ اضغط '📄 رفع سيرتي الذاتية' أولًا من القائمة.", main_menu())
+            await send_telegram_message(chat_id, "⚠️ اضغط '📄 رفع السيرة الذاتية' أولًا من القائمة.", main_menu())
             return
 
-        await send_telegram_message(chat_id, "⏳ جاري تحليل سيرتك الذاتية، الرجاء الانتظار...")
-
-        file_bytes = await download_telegram_file(file_id)
-        cv_text = extract_text_from_cv(file_bytes, file_name)
-
-        if len(cv_text.strip()) < 30:
-            await send_telegram_message(chat_id, "⚠️ تعذر استخراج نص كافٍ من الملف. تأكد أن الملف يحتوي نصًا قابلًا للقراءة.")
-            set_user_state(chat_id, "")
-            return
-
-        update_user(chat_id, cv_file_id=file_id, cv_file_name=file_name, cv_text=cv_text)
-
-        cv_language = user.get("cv_language", "العربية")
-
-        analysis = await analyze_cv(cv_text, cv_language)
-        await send_long_message(chat_id, f"📊 نتيجة التحليل الأولي:\n\n{analysis}")
-
-        improved_text = await rewrite_cv_ats(cv_text, cv_language)
-
-        if improved_text:
-            update_user(chat_id, cv_text=improved_text)
-            docx_bytes = build_docx_from_text(improved_text)
-            await send_document_bytes(
-                chat_id, docx_bytes, "CV_Improved_ATS.docx",
-                caption="✅ هذه نسخة محسّنة من سيرتك الذاتية متوافقة مع أنظمة ATS."
-            )
-        else:
-            await send_telegram_message(chat_id, "⚠️ تعذر تحسين السيرة الذاتية تلقائيًا، حاول مرة أخرى.")
-
-        set_user_state(chat_id, "")
-        await send_telegram_message(
-            chat_id,
-            "🎉 يمكنك الآن توليد خطاب تقديم مخصص عن طريق زر '✉️ توليد خطاب تقديم' وإرسال الوصف الوظيفي.",
-            main_menu()
-        )
-
-        if ADMIN_CHAT_ID:
-            await send_telegram_message(
-                int(ADMIN_CHAT_ID),
-                f"📥 عميل جديد حلل سيرته:\n👤 {user.get('full_name', 'غير محدد')}\n📱 {user.get('phone', 'غير محدد')}\n🆔 {chat_id}"
-            )
-
+        await process_cv_upload(chat_id, user, file_id, file_name)
         return
 
     if current_state == "waiting_job_description":
