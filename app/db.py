@@ -25,6 +25,7 @@ def init_db():
             phone TEXT DEFAULT '',
             cv_file_id TEXT DEFAULT '',
             cv_file_name TEXT DEFAULT '',
+            cv_text TEXT DEFAULT '',
             service_type TEXT DEFAULT '',
             email_subject TEXT DEFAULT '',
             email_body TEXT DEFAULT '',
@@ -60,6 +61,9 @@ def init_db():
     cols = [row[1] for row in c.execute("PRAGMA table_info(users)").fetchall()]
     if "state_context" not in cols:
         c.execute("ALTER TABLE users ADD COLUMN state_context TEXT DEFAULT ''")
+        conn.commit()
+    if "cv_text" not in cols:
+        c.execute("ALTER TABLE users ADD COLUMN cv_text TEXT DEFAULT ''")
         conn.commit()
 
     conn.close()
