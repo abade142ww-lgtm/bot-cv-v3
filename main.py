@@ -212,7 +212,7 @@ async def root():
 
 
 @app.post("/webhook")
-async def telegram_webhook(request: Request, x_telegram_bot_api_secret_token: str = Header(None)):
+async def telegram_webhook(request: Request, background_tasks: BackgroundTasks, x_telegram_bot_api_secret_token: str = Header(None)):
     if x_telegram_bot_api_secret_token != WEBHOOK_SECRET:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
@@ -221,17 +221,17 @@ async def telegram_webhook(request: Request, x_telegram_bot_api_secret_token: st
     except Exception:
         return {"ok": True}
 
-    try:
-        callback_query = update.get("callback_query")
-        if callback_query:
-            return await handle_callback_query(callback_query)
-        message = update.get("message")
-        if message:
-            return await handle_message(message)
+    callback_query = update.get("callback_query")
+    if callback_query:
+        background_tasks.add_task(handle_callback_query, callback_query)
         return {"ok": True}
-    except Exception:
-        logger.exception(f"Unhandled error processing update: {update}")
+
+    message = update.get("message")
+    if message:
+        background_tasks.add_task(handle_message, message)
         return {"ok": True}
+
+    return {"ok": True}
 
 
 async def handle_callback_query(callback_query):
