@@ -40,7 +40,7 @@ def main_menu():
     return {"inline_keyboard": [
         [{"text": "🚀 ابدأ إعداد الملف الوظيفي", "callback_data": "setup_profile"}],
         [{"text": "📄 رفع سيرتي الذاتية", "callback_data": "upload_cv"}],
-        [{"text": "✉️ توليد خطاب تقديم (cover letter)", "callback_data": "gen_cover_letter"}],
+        [{"text": "✉️ توليد خطاب تقديم (كفر ليتر)", "callback_data": "gen_cover_letter"}],
         [{"text": "❓ مساعدة", "callback_data": "help"}]
     ]}
 
@@ -151,6 +151,14 @@ async def ask_ai(prompt: str) -> str:
     except Exception:
         logger.exception("AI call failed")
         return ""
+
+
+def extract_score(analysis_text: str) -> int:
+    match = re.search(r"(\d{1,3})\s*(?:/|من)\s*100", analysis_text)
+    if match:
+        return int(match.group(1))
+    match2 = re.search(r"\b(\d{1,3})\b", analysis_text)
+    return int(match2.group(1)) if match2 else 0
 
 
 async def analyze_cv(text: str, language: str = "العربية") -> str:
@@ -367,16 +375,34 @@ async def handle_message(message):
         cv_language = user.get("cv_language", "العربية")
 
         analysis = await analyze_cv(cv_text, cv_language)
-        await send_long_message(chat_id, f"📊 نتيجة التحليل:\n\n{analysis}")
+        await send_long_message(chat_id, f"📊 نتيجة التحليل الأولي:\n\n{analysis}")
 
-        improved_text = await rewrite_cv_ats(cv_text, cv_language)
-        if improved_text:
-            update_user(chat_id, cv_text=improved_text)
-            docx_bytes = build_docx_from_text(improved_text)
+        current_text = cv_text
+        final_score = extract_score(analysis)
+        max_attempts = 5
+        attempt = 0
+
+        improved_text = await rewrite_cv_ats(current_text, cv_language)
+        while improved_text and attempt < max_attempts:
+            re_analysis = await analyze_cv(improved_text, cv_language)
+            new_score = extract_score(re_analysis)
+            if new_score >= final_score:
+                current_text = improved_text
+                final_score = new_score
+            attempt += 1
+            if final_score >= 95:
+                break
+            improved_text = await rewrite_cv_ats(current_text, cv_language)
+
+        if current_text != cv_text:
+            update_user(chat_id, cv_text=current_text)
+            docx_bytes = build_docx_from_text(current_text)
             await send_document_bytes(
                 chat_id, docx_bytes, "CV_Improved_ATS.docx",
-                caption="✅ هذه نسخة محسّنة من سيرتك الذاتية متوافقة مع أنظمة ATS."
+                caption=f"✅ نسخة محسّنة نهائية (تقييم ATS التقديري: {final_score}/100)"
             )
+        else:
+            await send_telegram_message(chat_id, "⚠️ تعذر تحسين السيرة الذاتية تلقائيًا، حاول مرة أخرى.")
 
         set_user_state(chat_id, "")
         await send_telegram_message(
