@@ -230,9 +230,17 @@ async def handle_callback_query(callback_query):
         await send_telegram_message(chat_id, "👋 لنبدأ إعداد ملفك الوظيفي.\n\nأرسل اسمك الكامل:")
         return {"ok": True}
 
-    if data == "upload_cv":
+       if data == "upload_cv":
+        set_user_state(chat_id, "waiting_language")
+        await answer_callback_query(callback_id, "اختر اللغة")
+        await send_telegram_message(chat_id, "🌐 بأي لغة تريد سيرتك الذاتية المحسّنة وخطاب التقديم؟", language_menu())
+        return {"ok": True}
+
+    if data in ("lang_ar", "lang_en"):
+        chosen_lang = "العربية" if data == "lang_ar" else "English"
+        update_user(chat_id, cv_language=chosen_lang)
         set_user_state(chat_id, "waiting_cv")
-        await answer_callback_query(callback_id, "رفع السيرة")
+        await answer_callback_query(callback_id, chosen_lang)
         await send_telegram_message(chat_id, "📄 أرسل سيرتك الذاتية الآن كملف PDF أو DOCX:")
         return {"ok": True}
 
