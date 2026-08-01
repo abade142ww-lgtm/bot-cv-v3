@@ -2,13 +2,13 @@ from fastapi import FastAPI, Request, Header, HTTPException
 import httpx
 import csv
 import os
+import re
+import io
 import html
 import logging
-from datetime import datetime
-import re
 import pdfplumber
 import docx
-import io
+from datetime import datetime
 
 from app.config import BOT_TOKEN, ADMIN_CHAT_ID, WEBHOOK_SECRET, BASE_URL
 from app.db import (
@@ -36,10 +36,7 @@ async def startup_event():
             async with httpx.AsyncClient(timeout=10.0) as client:
                 response = await client.post(
                     f"https://api.telegram.org/bot{BOT_TOKEN}/setWebhook",
-                    json={
-                        "url": f"{BASE_URL}/webhook",
-                        "secret_token": WEBHOOK_SECRET
-                    }
+                    json={"url": f"{BASE_URL}/webhook", "secret_token": WEBHOOK_SECRET}
                 )
                 logger.info(f"Webhook auto-registration: {response.status_code} {response.text}")
         except Exception:
@@ -341,6 +338,117 @@ async def answer_callback_query(callback_query_id, text=""):
                 logger.warning(f"answerCallbackQuery failed: {response.status_code} {response.text}")
     except httpx.RequestError:
         logger.exception("Network error in answer_callback_query")
+
+
+async def send_document_to_chat(chat_id, file_id, caption=""):
+    payload = {"chat_id": chat_id, "document": file_id, "caption": caption}
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendDocument", json=payload)
+            if response.status_code != 200:
+                logger.warning(f"sendDocument failed: {response.status_code} {response.text}")
+    except httpx.RequestError:
+        logger.exception("Network error in send_document_to_chat")
+
+
+async def download_telegram_file(file_id: str) -> bytes:
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        resp = await client.get(f"https://api.telegram.org/bot{BOT_TOKEN}/getFile", params={"file_id": file_id})
+        file_path = resp.json()["result"]["file_path"]
+        file_resp = await client.get(f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_path}")
+        return file_resp.content
+
+
+def extract_text_from_cv(file_bytes: bytes, file_name: str) -> str:
+    text = ""
+    try:
+        if file_name.lower().endswith(".pdf"):
+            with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+                for page in pdf.pages:
+                    page_text = page.extract_text()
+                    if page_text:
+                        text += page_text + "\n"
+        elif file_name.lower().endswith((".docx", ".doc")):
+            doc = docx.Document(io.BytesIO(file_bytes))
+            text = "\n".join(p.text for p in doc.paragraphs)
+    except Exception:
+        logger.exception("Failed to extract text from CV")
+    return text
+
+
+ATS_KEYWORDS = [
+    "experience", "education", "skills", "summary", "objective",
+    "خبرة", "تعليم", "مهارات", "دورات", "شهادات", "تدريب", "مشاريع"
+]
+
+
+def analyze_ats_score(text: str) -> dict:
+    text_lower = text.lower()
+    word_count = len(text.split())
+
+    found_sections = [kw for kw in ATS_KEYWORDS if kw in text_lower]
+    has_email = bool(re.search(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+", text))
+    has_phone = bool(re.search(r"(\+?\d[\d\s-]{7,}\d)", text))
+
+    score = 0
+    score += min(len(found_sections) * 10, 40)
+    score += 20 if has_email else 0
+    score += 15 if has_phone else 0
+    score += 15 if 150 <= word_count <= 1000 else 5
+    score += 10 if len(text.strip()) > 200 else 0
+    score = min(score, 100)
+
+    issues = []
+    if not has_email:
+        issues.append("لا يوجد بريد إلكتروني واضح")
+    if not has_phone:
+        issues.append("لا يوجد رقم جوال واضح")
+    if word_count < 150:
+        issues.append("محتوى السيرة قصير جدًا")
+    if word_count > 1000:
+        issues.append("السيرة طويلة جدًا، يفضل تقليصها")
+    if "skills" not in text_lower and "مهارات" not in text_lower:
+        issues.append("لا يوجد قسم مهارات واضح")
+    if "experience" not in text_lower and "خبرة" not in text_lower:
+        issues.append("لا يوجد قسم خبرات واضح")
+
+    return {
+        "score": score,
+        "word_count": word_count,
+        "found_sections": found_sections,
+        "has_email": has_email,
+        "has_phone": has_phone,
+        "issues": issues
+    }
+
+
+async def send_cv_with_ats_to_admin(chat_id, user, file_id, file_name):
+    if not ADMIN_CHAT_ID:
+        return
+
+    try:
+        file_bytes = await download_telegram_file(file_id)
+        text = extract_text_from_cv(file_bytes, file_name)
+        report = analyze_ats_score(text)
+    except Exception:
+        logger.exception("Failed to analyze CV")
+        report = {"score": 0, "word_count": 0, "issues": ["تعذر تحليل الملف تلقائيًا"]}
+
+    issues_text = "\n".join(f"- {i}" for i in report["issues"]) if report["issues"] else "لا توجد ملاحظات كبيرة ✅"
+
+    caption = (
+        f"📄 سيرة ذاتية جديدة\n\n"
+        f"👤 الاسم: {user['full_name'] or 'غير محدد'}\n"
+        f"📱 الجوال: {user['phone'] or 'غير محدد'}\n"
+        f"🆔 chat_id: {chat_id}\n\n"
+        f"📊 تقييم ATS: {report['score']} / 100\n"
+        f"عدد الكلمات: {report['word_count']}\n\n"
+        f"⚠️ ملاحظات:\n{issues_text}\n\n"
+        f"لإرسال نسخة معدّلة للعميل، أرفق الملف المعدّل وأرسل كابشن:\n"
+        f"/send_cv {chat_id}"
+    )
+
+    await send_document_to_chat(int(ADMIN_CHAT_ID), file_id, caption)
 
 
 async def notify_admin_application(application):
@@ -736,6 +844,29 @@ async def handle_message(message):
         await send_telegram_message(chat_id, "❌ تم إلغاء العملية الحالية.", main_menu())
         return {"ok": True}
 
+    if text.startswith("/send_cv") and ADMIN_CHAT_ID and chat_id == int(ADMIN_CHAT_ID):
+        parts = text.split()
+        if len(parts) != 2 or not parts[1].isdigit():
+            await send_telegram_message(chat_id, "⚠️ الصيغة الصحيحة: /send_cv <chat_id> مع إرفاق الملف المعدّل كابشن.")
+            return {"ok": True}
+
+        target_chat_id = int(parts[1])
+
+        if "document" not in message:
+            await send_telegram_message(chat_id, "⚠️ يجب إرفاق الملف المعدّل مع نفس رسالة الأمر (كابشن على الملف).")
+            return {"ok": True}
+
+        document = message["document"]
+        file_id = document.get("file_id", "")
+
+        await send_document_to_chat(
+            target_chat_id,
+            file_id,
+            caption="✅ تم تعديل سيرتك الذاتية بواسطة فريقنا، هذه النسخة الجاهزة النهائية 🎉"
+        )
+        await send_telegram_message(chat_id, f"✅ تم إرسال السيرة المعدّلة للعميل ({target_chat_id}) بنجاح.")
+        return {"ok": True}
+
     current_state, context = get_user_state_full(chat_id)
 
     if "document" in message:
@@ -749,6 +880,7 @@ async def handle_message(message):
             return {"ok": True}
 
         update_user(chat_id, cv_file_id=file_id, cv_file_name=file_name)
+        await send_cv_with_ats_to_admin(chat_id, get_or_create_user(chat_id), file_id, file_name)
 
         if current_state == "waiting_cv_only":
             set_user_state(chat_id, "")
