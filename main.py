@@ -376,3 +376,4 @@ async def handle_message(message):
 
     await send_telegram_message(chat_id, "لم أفهم طلبك، استخدم الأزرار أدناه:", main_menu())
     return {"ok": True}
+    
