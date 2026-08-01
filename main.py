@@ -17,8 +17,7 @@ logger = logging.getLogger("bot")
 
 app = FastAPI()
 
-ai_client = OpenAI(api_key=PERPLEXITY_API_KEY, base_url="https://api.perplexity.ai")
-
+ai_client = OpenAI(api_key=PERPLEXITY_API_KEY, base_url="https://api.perplexity.ai/v1")
 
 @app.on_event("startup")
 async def startup_event():
