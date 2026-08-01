@@ -40,8 +40,15 @@ def main_menu():
     return {"inline_keyboard": [
         [{"text": "🚀 ابدأ إعداد الملف الوظيفي", "callback_data": "setup_profile"}],
         [{"text": "📄 رفع سيرتي الذاتية", "callback_data": "upload_cv"}],
-        [{"text": "✉️ توليد خطاب تقديم (كفر ليتر)", "callback_data": "gen_cover_letter"}],
+        [{"text": "✉️ توليد خطاب تقديم (cover letter)", "callback_data": "gen_cover_letter"}],
         [{"text": "❓ مساعدة", "callback_data": "help"}]
+    ]}
+
+
+def language_menu():
+    return {"inline_keyboard": [
+        [{"text": "🇸🇦 العربية", "callback_data": "lang_ar"}],
+        [{"text": "🇬🇧 English", "callback_data": "lang_en"}]
     ]}
 
 
@@ -146,8 +153,9 @@ async def ask_ai(prompt: str) -> str:
         return ""
 
 
-async def analyze_cv(text: str) -> str:
+async def analyze_cv(text: str, language: str = "العربية") -> str:
     prompt = f"""حلل السيرة الذاتية التالية من ناحية توافقها مع أنظمة ATS، بدون اختلاق معلومات غير موجودة في النص.
+اكتب الرد كاملًا بلغة: {language}
 
 السيرة الذاتية:
 {text}
@@ -160,8 +168,9 @@ async def analyze_cv(text: str) -> str:
     return await ask_ai(prompt)
 
 
-async def rewrite_cv_ats(text: str) -> str:
+async def rewrite_cv_ats(text: str, language: str = "العربية") -> str:
     prompt = f"""أعد كتابة السيرة الذاتية التالية بحيث تكون مُحسّنة بالكامل لأنظمة ATS (Applicant Tracking System)، مع الحفاظ الصارم على كل الحقائق والمعلومات الموجودة في النص الأصلي فقط، بدون اختلاق أي خبرة أو مهارة أو تاريخ غير مذكور أصلًا.
+اكتب السيرة الذاتية النهائية بالكامل بلغة: {language}
 
 معايير التحسين:
 - عناوين أقسام واضحة (الملخص المهني، الخبرات، المهارات، التعليم)
@@ -172,12 +181,13 @@ async def rewrite_cv_ats(text: str) -> str:
 السيرة الذاتية الأصلية:
 {text}
 
-أعطني فقط النص النهائي المُحسّن، بدون أي شرح إضافي قبله أو بعده."""
+أعطني فقط النص النهائي المُحسّن باللغة المطلوبة، بدون أي شرح إضافي قبله أو بعده."""
     return await ask_ai(prompt)
 
 
-async def generate_cover_letter(cv_text: str, job_description: str) -> str:
-    prompt = f"""بناءً على السيرة الذاتية التالية والوصف الوظيفي المطلوب، اكتب خطاب تقديم (Cover Letter) مهني ومخصص باللغة العربية، معتمدًا فقط على المعلومات الموجودة فعليًا في السيرة الذاتية بدون اختلاق أي معلومة.
+async def generate_cover_letter(cv_text: str, job_description: str, language: str = "العربية") -> str:
+    prompt = f"""بناءً على السيرة الذاتية التالية والوصف الوظيفي المطلوب، اكتب خطاب تقديم (Cover Letter) مهني ومخصص، معتمدًا فقط على المعلومات الموجودة فعليًا في السيرة الذاتية بدون اختلاق أي معلومة.
+اكتب الخطاب بالكامل بلغة: {language}
 
 السيرة الذاتية:
 {cv_text}
@@ -230,7 +240,7 @@ async def handle_callback_query(callback_query):
         await send_telegram_message(chat_id, "👋 لنبدأ إعداد ملفك الوظيفي.\n\nأرسل اسمك الكامل:")
         return {"ok": True}
 
-       if data == "upload_cv":
+    if data == "upload_cv":
         set_user_state(chat_id, "waiting_language")
         await answer_callback_query(callback_id, "اختر اللغة")
         await send_telegram_message(chat_id, "🌐 بأي لغة تريد سيرتك الذاتية المحسّنة وخطاب التقديم؟", language_menu())
@@ -261,9 +271,10 @@ async def handle_callback_query(callback_query):
             chat_id,
             "🤖 خطوات استخدام البوت:\n\n"
             "1️⃣ اضغط 'ابدأ إعداد الملف الوظيفي' وأدخل بياناتك\n"
-            "2️⃣ ارفع سيرتك الذاتية (PDF أو DOCX)\n"
-            "3️⃣ سيحللها الذكاء الاصطناعي ويرسل لك نسخة محسّنة بنظام ATS\n"
-            "4️⃣ أرسل الوصف الوظيفي المطلوب لتوليد خطاب تقديم مخصص تلقائيًا",
+            "2️⃣ اختر لغة السيرة الذاتية (عربي/إنجليزي)\n"
+            "3️⃣ ارفع سيرتك الذاتية (PDF أو DOCX)\n"
+            "4️⃣ سيحللها الذكاء الاصطناعي ويرسل لك نسخة محسّنة بنظام ATS\n"
+            "5️⃣ أرسل الوصف الوظيفي المطلوب لتوليد خطاب تقديم مخصص تلقائيًا",
             main_menu()
         )
         return {"ok": True}
@@ -319,9 +330,13 @@ async def handle_message(message):
         if len(text) < 2:
             await send_telegram_message(chat_id, "⚠️ أرسل تخصصًا صحيحًا.")
             return {"ok": True}
-                update_user(chat_id, specialization=text)
+        update_user(chat_id, specialization=text)
         set_user_state(chat_id, "waiting_language")
         await send_telegram_message(chat_id, "✅ تم حفظ بياناتك.\n\n🌐 بأي لغة تريد سيرتك الذاتية المحسّنة وخطاب التقديم؟", language_menu())
+        return {"ok": True}
+
+    if current_state == "waiting_language":
+        await send_telegram_message(chat_id, "⚠️ الرجاء استخدام الأزرار لاختيار اللغة.", language_menu())
         return {"ok": True}
 
     if "document" in message:
@@ -349,10 +364,12 @@ async def handle_message(message):
 
         update_user(chat_id, cv_file_id=file_id, cv_file_name=file_name, cv_text=cv_text)
 
-        analysis = await analyze_cv(cv_text)
+        cv_language = user.get("cv_language", "العربية")
+
+        analysis = await analyze_cv(cv_text, cv_language)
         await send_long_message(chat_id, f"📊 نتيجة التحليل:\n\n{analysis}")
 
-        improved_text = await rewrite_cv_ats(cv_text)
+        improved_text = await rewrite_cv_ats(cv_text, cv_language)
         if improved_text:
             update_user(chat_id, cv_text=improved_text)
             docx_bytes = build_docx_from_text(improved_text)
@@ -388,8 +405,10 @@ async def handle_message(message):
             set_user_state(chat_id, "")
             return {"ok": True}
 
+        cv_language = user.get("cv_language", "العربية")
+
         await send_telegram_message(chat_id, "⏳ جاري توليد خطاب التقديم...")
-        cover_letter = await generate_cover_letter(cv_text, text)
+        cover_letter = await generate_cover_letter(cv_text, text, cv_language)
         set_user_state(chat_id, "")
         await send_long_message(chat_id, f"✉️ خطاب التقديم المخصص:\n\n{cover_letter}", main_menu())
         return {"ok": True}
